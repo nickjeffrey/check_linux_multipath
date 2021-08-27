@@ -1,0 +1,328 @@
+#!/usr/bin/perl -w
+
+
+
+# DESCRIPTION
+# -----------
+#  This script is a nagios check that determines the health status of Linux SAN multipaths
+
+
+# OUTSTANDING TASKS
+# ----------------
+# - multipathd needs root privileges, so either setup sudo, or run from root crontab as helper script
+# - this script should be owned by root because it gets executed from the root crontab (add security comments)
+# - 
+
+
+# CHANGE LOG
+# ----------
+#  2021/08/25   njeffrey	Script created
+
+
+
+# NOTES
+# -----
+#
+#  This script should return one (and only one) line of ouput.  Multiple
+#  lines of output are silently ignored by nagios.
+#
+#  The line of output will become the body of the alert message sent by nagios
+#
+#
+#  You will need a section in the services.cfg
+#  file on the nagios server that looks similar to the following.
+#   define service{
+#           use                             generic-24x7-service
+#           host_name                       linux01.example.com
+#           service_description             dm-multipath
+#           check_command                   check_by_ssh!"/usr/local/nagios/libexec/check_linux_multipath"
+#           }
+#
+#
+#
+#
+# The multipathd command requires root privileges to run.
+# Instead of giving the low-privileged nagios user extra permissions,
+# schedule this job to run from the root crontab and create a temporary file,
+# which will be read the next time the script runs
+# Create a root crontab entry similar to:
+#   1,6,11,16,21,26,31,36,41,46,51,56 * * * * /usr/local/nagios/libexec/check_linux_multipath  1>/dev/null 2>/dev/null #nagios helper script
+
+
+
+use strict;                                     #enforce good coding practices
+use Getopt::Long;                               #allow --long-switches to be used as parameters
+
+
+# declare variables
+my ($OK,$WARN,$CRITICAL,$UNKNOWN);
+my ($CHECK_NAME,$host);
+my (%multipath,$multipathd,$cmd,$key,$common_output_data,$perf_data);
+my ($output_message,$output_filename,$output_file_age);
+my ($paths_active,$paths_passive,$paths_faulty,$paths_shaky);
+my ($opt_h,$opt_v);
+my ($verbose);
+my ($dev,$ino,$mode,$nlink,$uid,$gid,$rdev,$size,$atime,$mtime,$ctime,$blksize,$blocks);
+$CHECK_NAME= "dm-multipath SAN disk paths";
+$verbose = "no";                                #for debugging
+$output_filename = "/tmp/nagios.check_linux_multipath.tmp";  #temporary filename created by script
+$multipathd = "/sbin/multipathd";		#location of binary
+$paths_active  = 0;				#initialize counter variable
+$paths_passive = 0;                             #initialize counter variable
+$paths_faulty  = 0;                             #initialize counter variable
+$paths_shaky   = 0;                             #initialize counter variable
+
+
+#
+# Nagios return codes
+#
+$OK       = 0;
+$WARN     = 1;
+$CRITICAL = 2;
+$UNKNOWN  = 3;
+
+
+
+sub get_options {
+   #
+   # this gets the command line parameters provided by the users
+   print "running get_options subroutine \n" if ($verbose eq "yes");
+   #
+   Getopt::Long::Configure('bundling');
+   GetOptions(
+      "h"   => \$opt_h, "help"        => \$opt_h,
+      "v"   => \$opt_v, "verbose"     => \$opt_v,
+   );
+   #
+   #
+   # see if user provided -v or --verbose switch
+   if ( defined($opt_v) ) {
+      $verbose = "yes";
+   }                                                    #end of if block
+   #
+   #
+   # see if user provided -h or --help switch
+   if ( defined($opt_h) ) {
+      print "Nagios plugin for determining health of Linux dm-mulipath SAN disk paths \n";
+      print "$0 [options]  \n";
+      print "    where options are: \n";
+      print "    -h --help \n";
+      print "    -v --verbose \n";
+      print "\n\n";
+      exit;
+   }                                                    #end of if block
+}                       #end of subroutine
+
+
+
+sub sanity_checks {
+   #
+   print "running sanity_checks subroutine \n" if ($verbose eq "yes");
+   #
+   #
+   # Confirm required files exist
+   #
+   $multipathd = "/sbin/multipathd"     if ( -e "/sbin/multipathd" );      
+   $multipathd = "/usr/sbin/multipathd" if ( -e "/usr/sbin/multipathd" );  
+   if ( ! -f "$multipathd" ) {
+      print "$CHECK_NAME UNKNOWN - cannot find multipathd file \n";
+      exit $UNKNOWN;                                    #exit script
+   }
+}                                               #end of subroutine
+
+
+sub check_for_output_file {
+   #
+   # a cron job may have already created the output file that we need
+   #
+   print "running check_for_output_file subroutine \n" if ($verbose eq "yes");
+   #
+   #
+   # delete the output file if it is more than 4 minutes (240 seconds) old (this will work when run via root user but not when run as nagios user due to permissions)
+   if ( -e "$output_filename" )  {                                      #see if a cron job has already provided the info we need
+      ($dev,$ino,$mode,$nlink,$uid,$gid,$rdev,$size,$atime,$mtime,$ctime,$blksize,$blocks) = stat($output_filename); #get last modification time in seconds since the epoch
+      $output_file_age = time - $mtime;                                 #figure out how many seconds old the file is
+      print "   output file $output_filename is $output_file_age seconds old \n" if ($verbose eq "yes");
+      if ( $output_file_age >= 240 ) {                                  #see if the file is more than 240 seconds old
+         if ( -w $output_filename )  {                                  #file is writable if this script executed by root, but read-only when executed via nagios
+            print "   deleting old copy of $output_filename \n" if ($verbose eq "yes");
+            unlink "$output_filename";                                  #delete the file if it is too old
+         }
+      }
+      if ( (-e "$output_filename") && ($output_file_age >= 900) ) {        #raise an alert if the file is more than 900 seconds old
+         print "$CHECK_NAME WARN - temporary file $output_filename not being automatically created via cron.  Please investigate. \n";
+         exit $WARN;                                                    #exit script
+      }                                                                 #end of if block
+   }                                                                    #end of if block
+   #
+   if ( -e "$output_filename" ) {                                       #see if a cron job has already provided the info we need
+      open (OUT,"$output_filename") or die "Cannot open $output_filename for reading $! \n";
+      while (<OUT>) {                                                   #read a line from the text file
+         $output_message = $_  if ( $_ =~ /[a-zA-Z]/);                  #get the content of the output file into a variable
+         print "   output message is $output_message \n" if ($verbose eq "yes");
+      }                                                                 #end of while loop
+      close OUT;                                                        #close filehandle
+      print $output_message;                                            #print the content of the output file
+      exit $CRITICAL if ( $output_message =~ /CRITICAL/ );              #exit script with appropriate return code
+      exit $WARN     if ( $output_message =~ /WARN/ );                  #exit script with appropriate return code
+      exit $UNKNOWN  if ( $output_message =~ /UNKNOWN/ );               #exit script with appropriate return code
+      exit $OK       if ( $output_message =~ /OK/ );                    #exit script with appropriate return code
+   }                                                                    #end of if block
+}                                                                       #end of subroutine
+
+
+
+
+sub print_to_outputfile {
+   #
+   print "running print_to_outputfile \n" if ($verbose eq "yes");
+   #
+   # This subroutine is called whenever an output message is printed, to confirm that the $output_file exists
+   #
+   # confirm the output message exists
+   $output_message = "$CHECK_NAME UNKNOWN - could not parse response from remote host \n" unless ($output_message);
+   #
+   # confirm the $output_filename variable is defined
+   unless ($output_filename) {
+      print "$CHECK_NAME UNKNOWN - the \$output_filename variable is not defined.  This might be a script bug. \n";
+      exit $UNKNOWN;                                                            #only get this far if OK/WARN/CRITICAL/UNKNOWN was not found in the output file
+   }                                                                            #end of unless block
+   #
+   if ( ! -e "$output_filename" ) {                                                     #only run this section if $output_filename does not already exist
+      print "   $output_filename not found - writing output message to $output_filename \n" if ($verbose eq "yes");
+      open (OUT,">$output_filename") or die "Cannot open $output_filename for writing: $! \n";
+      print OUT "$output_message";
+      close OUT;                                                                #close filehandle
+      chmod 0644, "$output_filename";                                           #set the file permission to -rw-r--r-- to ensure nagios user can read file
+   }                                                                            #end of if block
+}                                                                               #end of subroutine
+
+
+
+
+sub get_multipath_details {
+   #
+   print "running get_multipath_details subroutine \n" if ($verbose eq "yes");
+   #
+   #
+   #
+   # Confirm multipath daemon is running
+   # command output will look similar to:
+   # # multipathd show daemon
+   # pid 23643 running
+   $cmd = "$multipathd show daemon";
+   print "   running command $cmd \n" if ($verbose eq "yes");
+   open(IN,"$cmd |");			#open filehandle using command output
+   while (<IN>) {			#read a line from the filehandle
+      unless ( /^pid [0-9]+ running/ ) {
+         print "$CHECK_NAME WARN - multipathd daemon is not running \n";
+         exit $WARN;                                    #exit script
+      }						#end of unless block
+   }						#end of while loop
+   close IN;					#close filehandle
+   #
+   #
+   #
+   # Command output will look similar to the following:
+   # multipathd show paths
+   # hcil      dev   dev_t   pri dm_st  chk_st dev_st  next_check
+   # 0:0:0:0   sda   8:0     1   undef  undef  unknown orphan           <--- internal disk not controlled by multipathd
+   # 1:0:0:0   sdb   8:16    1   undef  undef  unknown orphan           <--- internal disk not controlled by multipathd
+   # 10:0:0:0  sdc   8:32    50  active ready  running XXXXXXXX.. 17/20
+   # 10:0:0:1  sdd   8:48    10  active ready  running XXXXXXXX.. 17/20
+   # 10:0:0:10 sdm   8:192   50  active ready  running XXXXXXXX.. 17/20
+   # 10:0:0:11 sdn   8:208   10  active ready  running XXXXXXXX.. 17/20
+   # 10:0:0:12 sdo   8:224   50  active ready  running XXXXXXX... 15/20
+   # 10:0:0:13 sdp   8:240   10  active ready  running XXXXXXX... 15/20
+   # 10:0:0:14 sdq   65:0    50  active ready  running XXXXXXX... 15/20
+   #
+   # 
+   $cmd = "$multipathd show paths";
+   print "   running command $cmd \n" if ($verbose eq "yes");
+   open(IN,"$cmd |");			#open filehandle using command output
+   while (<IN>) {			#read a line from the filehandle
+      if ( /(^[0-9]+:[0-9]+:[0-9]+:[0-9]+) +(sd[a-z]+) +([0-9]+:[0-9]+) +([0-9]+) +([a-z]+) +([a-z]+)/ ) {
+         $multipath{$2}{hcil}   = $1;	#Host:Channel:ID:LUN
+         $multipath{$2}{dev}    = $2;	#kernel device name
+         $multipath{$2}{dev_t}  = $3;	#major:minor 
+         $multipath{$2}{pri}    = $4;	#path priority
+         $multipath{$2}{dm_st}  = $5;	#device-mapper status  active|failed
+         $multipath{$2}{chk_st} = $6;	#path checker status   ready|ghost|faulty|shaky
+         $multipath{$2}{dev_st} = $7;	#device state	       running|offline
+         print "   device:$multipath{$2}{dev} priority:$multipath{$2}{pri} chk_st:$multipath{$2}{chk_st} \n" if ($verbose eq "yes");
+      } 				#end of if block
+     
+   }
+   close IN;				#close filehandle
+   #
+   #
+   # look for failed paths
+   #
+   # chk_st - If the path is up and ready for I/O, the status of the path is ready or ghost. 
+   #          If the path is down, the status is faulty or shaky. 
+   #          The path status is updated periodically by the multipathd daemon based on the polling 
+   #          interval defined in the /etc/multipath.conf file.
+   # dm_st  - The dm status is similar to the path status, but from the kernel's point of view. 
+   #          The dm status has two states: failed, which is analogous to faulty, and active which 
+   #          covers all other path states. Occasionally, the path state and the dm state of a device 
+   #          will temporarily not agree.
+   # dev_st - The possible values for online_status are running and offline. 
+   #          A status of offline means that this SCSI device has been disabled.
+   #
+   foreach $key (keys %multipath) {
+      next unless $key;				#skip any blank lines in hash
+      $paths_active++  if ( $multipath{$key}{chk_st} eq "ready" );
+      $paths_passive++ if ( $multipath{$key}{chk_st} eq "ghost" );
+      $paths_faulty++  if ( $multipath{$key}{chk_st} eq "faulty" );
+      $paths_shaky++   if ( $multipath{$key}{chk_st} eq "shaky" );
+   }						#end of foreach loop
+}                                               #end of subroutine
+
+
+
+
+sub print_output {
+   #
+   print "running print_output subroutine \n" if ($verbose eq "yes");
+   #
+   #
+   # The nagios performance data will be the same for all the outputs, so just put it in a common variable
+   # The format is:  label=value[UOM];[warn];[crit];[min];[max]
+   # On the "label=value" section is required.  The warn|crit|min|max entries are optional.
+   # You can have multiple items of perf data, just separate each section with a space
+   # UOM is Units Of Measurement.    Can be s=seconds B=bytes MB=megabytes %=percent c=counter
+   $perf_data = "active=$paths_active;;;; passive=$paths_passive;;;; faulty=$paths_faulty;;;; shaky=$paths_shaky;;;;"; 
+   #
+   #
+   $common_output_data = "active:$paths_active passive:$paths_passive faulty:$paths_faulty shaky:$paths_shaky";
+   #
+   if ( $paths_faulty > 0 ) {
+       $output_message = "$CHECK_NAME WARN - detected $paths_faulty faulty paths.  $common_output_data | $perf_data \n";
+       print $output_message;			#print output to screen
+       print_to_outputfile;			#call subroutine to confirm $output_filename is used for subsequent runs
+       exit $WARN;
+   }
+   if ( $paths_shaky > 0 ) {
+       $output_message = "$CHECK_NAME WARN - detected $paths_shaky shaky paths.  $common_output_data | $perf_data \n";
+       print $output_message;			#print output to screen
+       print_to_outputfile;			#call subroutine to confirm $output_filename is used for subsequent runs
+       exit $WARN;
+   }
+   # we only get this far if everything is ok
+   $output_message = "$CHECK_NAME OK - $common_output_data | $perf_data  \n";
+   print $output_message;			#print output to screen
+   print_to_outputfile;			#call subroutine to confirm $output_filename is used for subsequent runs
+   exit $OK;
+}                       #end of subroutine
+
+
+
+
+# ----------------- main body of script ---------------------------
+get_options;
+sanity_checks;
+check_for_output_file;
+get_multipath_details;
+print_output;
+
+
