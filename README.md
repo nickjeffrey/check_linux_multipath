@@ -1,6 +1,8 @@
 # check_linux_multipath
 nagios check for linux multipath SAN disk path status
 
+This check validates that all the SAN paths used by Linux dm-multipath are active.  This type of check is used on bare-metal installs of Linux with physical fibre channel or ethernet connections to SAN storage.  Linux virtual machines do not need to run this check, because their storage connectivity is provided by the hypervisor.
+
 # Requirements
 perl, SSH key pair auth
 
