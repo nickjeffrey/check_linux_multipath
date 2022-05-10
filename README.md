@@ -27,7 +27,7 @@ To avoid giving the low-privileged nagios user permission to run multipathd via 
 # Output
 You will see output similar to the following:
 ```
-<font color=green>dm-multipath SAN disk paths OK - active:80 passive:0 faulty:0 shaky:0 </font>
-<font color=red>dm-multipath SAN disk paths WARN - active:40 passive:0 faulty:40 shaky:0 </font>
+dm-multipath SAN disk paths OK - active:80 passive:0 faulty:0 shaky:0 
+dm-multipath SAN disk paths WARN - active:40 passive:0 faulty:40 shaky:0 
 ```
 
