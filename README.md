@@ -14,7 +14,7 @@ perl, SSH key pair auth
 Add a section similar to the following to the services.cfg file on the nagios server.
 ```
 define service{
-        use                             generic-24x7-service
+        use                             generic-service
         host_name                       linux01.example.com
         service_description             dm-multipath
         check_command                   check_by_ssh!"/usr/local/nagios/libexec/check_linux_multipath"
