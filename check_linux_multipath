@@ -9,9 +9,9 @@
 
 # OUTSTANDING TASKS
 # ----------------
-# - multipathd needs root privileges, so either setup sudo, or run from root crontab as helper script
-# - this script should be owned by root because it gets executed from the root crontab (add security comments)
-# - 
+# - multipathd needs root privileges, so either setup sudo, or run from root crontab as helper script 
+# - this script should be owned by root because it gets executed from the root crontab, so only the root user should be able to edit the script.
+#  
 
 
 # CHANGE LOG
@@ -33,7 +33,7 @@
 #  You will need a section in the services.cfg
 #  file on the nagios server that looks similar to the following.
 #   define service{
-#           use                             generic-24x7-service
+#           use                             generic-service
 #           host_name                       linux01.example.com
 #           service_description             dm-multipath
 #           check_command                   check_by_ssh!"/usr/local/nagios/libexec/check_linux_multipath"
@@ -42,7 +42,7 @@
 #
 #
 #
-# The multipathd command requires root privileges to run on RHEL 7.x, but can use the low-privileged nagios user on RHEL 8.5+
+# The multipathd command requires root privileges to run on RHEL 7.x, 8.x, 9.x
 # Instead of giving the low-privileged nagios user extra permissions,
 # schedule this job to run from the root crontab and create a temporary file,
 # which will be read the next time the script runs
@@ -214,8 +214,12 @@ sub get_multipath_details {
    # pid 23643 idle
    $cmd = "$multipathd show daemon";
    print "   running command $cmd \n" if ($verbose eq "yes");
-   open(IN,"$cmd |");			#open filehandle using command output
+   open(IN,"$cmd 2>&1|");			#open filehandle using command output
    while (<IN>) {			#read a line from the filehandle
+      if ( /^need to be root/ ) {
+         print "$CHECK_NAME WARN - this script needs to be run with root privileges.  Please create root crontab entry as described in script documentation.\n";
+         exit $WARN;                                    #exit script
+      }						#end of unless block
       unless ( (/^pid [0-9]+ running/) || (/^pid [0-9]+ idle/) ) {
          print "$CHECK_NAME WARN - multipathd daemon is not running \n";
          exit $WARN;                                    #exit script
@@ -243,6 +247,10 @@ sub get_multipath_details {
    print "   running command $cmd \n" if ($verbose eq "yes");
    open(IN,"$cmd |");			#open filehandle using command output
    while (<IN>) {			#read a line from the filehandle
+      if ( /^need to be root/ ) {
+         print "$CHECK_NAME WARN - this script needs to be run with root privileges.  Please create root crontab entry as described in script documentation.\n";
+         exit $WARN;                                    #exit script
+      }						#end of unless block
       if ( /(^[0-9]+:[0-9]+:[0-9]+:[0-9]+) +(sd[a-z]+) +([0-9]+:[0-9]+) +([0-9]+) +([a-z]+) +([a-z]+)/ ) {
          $multipath{$2}{hcil}   = $1;	#Host:Channel:ID:LUN
          $multipath{$2}{dev}    = $2;	#kernel device name
