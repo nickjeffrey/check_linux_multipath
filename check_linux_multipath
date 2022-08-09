@@ -17,6 +17,7 @@
 # CHANGE LOG
 # ----------
 #  2021/08/25   njeffrey	Script created
+#  2022/08095   njeffrey	Bug fix in regex for "multipathd show daemon"
 
 
 
@@ -41,7 +42,7 @@
 #
 #
 #
-# The multipathd command requires root privileges to run.
+# The multipathd command requires root privileges to run on RHEL 7.x, but can use the low-privileged nagios user on RHEL 8.5+
 # Instead of giving the low-privileged nagios user extra permissions,
 # schedule this job to run from the root crontab and create a temporary file,
 # which will be read the next time the script runs
@@ -210,11 +211,12 @@ sub get_multipath_details {
    # command output will look similar to:
    # # multipathd show daemon
    # pid 23643 running
+   # pid 23643 idle
    $cmd = "$multipathd show daemon";
    print "   running command $cmd \n" if ($verbose eq "yes");
    open(IN,"$cmd |");			#open filehandle using command output
    while (<IN>) {			#read a line from the filehandle
-      unless ( /^pid [0-9]+ running/ ) {
+      unless ( (/^pid [0-9]+ running/) || (/^pid [0-9]+ idle/) ) {
          print "$CHECK_NAME WARN - multipathd daemon is not running \n";
          exit $WARN;                                    #exit script
       }						#end of unless block
