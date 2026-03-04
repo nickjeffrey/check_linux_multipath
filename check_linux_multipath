@@ -17,7 +17,8 @@
 # CHANGE LOG
 # ----------
 #  2021/08/25   njeffrey	Script created
-#  2022/08095   njeffrey	Bug fix in regex for "multipathd show daemon"
+#  2022/08/05   njeffrey	Bug fix in regex for "multipathd show daemon"
+#  2026/03/04   njeffrey	Bug fix in regex for "multipathd show paths"
 
 
 
@@ -231,16 +232,17 @@ sub get_multipath_details {
    #
    # Command output will look similar to the following:
    # multipathd show paths
-   # hcil      dev   dev_t   pri dm_st  chk_st dev_st  next_check
-   # 0:0:0:0   sda   8:0     1   undef  undef  unknown orphan           <--- internal disk not controlled by multipathd
-   # 1:0:0:0   sdb   8:16    1   undef  undef  unknown orphan           <--- internal disk not controlled by multipathd
-   # 10:0:0:0  sdc   8:32    50  active ready  running XXXXXXXX.. 17/20
-   # 10:0:0:1  sdd   8:48    10  active ready  running XXXXXXXX.. 17/20
-   # 10:0:0:10 sdm   8:192   50  active ready  running XXXXXXXX.. 17/20
-   # 10:0:0:11 sdn   8:208   10  active ready  running XXXXXXXX.. 17/20
-   # 10:0:0:12 sdo   8:224   50  active ready  running XXXXXXX... 15/20
-   # 10:0:0:13 sdp   8:240   10  active ready  running XXXXXXX... 15/20
-   # 10:0:0:14 sdq   65:0    50  active ready  running XXXXXXX... 15/20
+   # hcil       dev   dev_t   pri dm_st  chk_st dev_st  next_check
+   # 0:0:0:0    sda   8:0     1   undef  undef  unknown orphan           <--- internal disk not controlled by multipathd
+   # 1:0:0:0    sdb   8:16    1   undef  undef  unknown orphan           <--- internal disk not controlled by multipathd
+   # 10:0:0:0   sdc   8:32    50  active ready  running XXXXXXXX.. 17/20
+   # 10:0:0:1   sdd   8:48    10  active ready  running XXXXXXXX.. 17/20
+   # 10:0:0:10  sdm   8:192   50  active ready  running XXXXXXXX.. 17/20
+   # 10:0:0:11  sdn   8:208   10  active ready  running XXXXXXXX.. 17/20
+   # 10:0:0:12  sdo   8:224   50  active ready  running XXXXXXX... 15/20
+   # 10:0:0:13  sdp   8:240   10  active ready  running XXXXXXX... 15/20
+   # 10:0:0:14  sdq   65:0    50  active ready  running XXXXXXX... 15/20
+   # 21:0:0:2  sdag   66:0    -1  failed faulty offline XXXXXXXXXX 5/5   <--- failed path
    #
    # 
    $cmd = "$multipathd show paths";
@@ -251,7 +253,7 @@ sub get_multipath_details {
          print "$CHECK_NAME WARN - this script needs to be run with root privileges.  Please create root crontab entry as described in script documentation.\n";
          exit $WARN;                                    #exit script
       }						#end of unless block
-      if ( /(^[0-9]+:[0-9]+:[0-9]+:[0-9]+) +(sd[a-z]+) +([0-9]+:[0-9]+) +([0-9]+) +([a-z]+) +([a-z]+)/ ) {
+      if ( /(^[0-9]+:[0-9]+:[0-9]+:[0-9]+) +(sd[a-z]+) +([0-9]+:[0-9]+) +([0-9\-]+) +([a-z]+) +([a-z]+) +([a-z]+)/ ) {
          $multipath{$2}{hcil}   = $1;	#Host:Channel:ID:LUN
          $multipath{$2}{dev}    = $2;	#kernel device name
          $multipath{$2}{dev_t}  = $3;	#major:minor 
@@ -259,7 +261,7 @@ sub get_multipath_details {
          $multipath{$2}{dm_st}  = $5;	#device-mapper status  active|failed
          $multipath{$2}{chk_st} = $6;	#path checker status   ready|ghost|faulty|shaky
          $multipath{$2}{dev_st} = $7;	#device state	       running|offline
-         print "   device:$multipath{$2}{dev} priority:$multipath{$2}{pri} chk_st:$multipath{$2}{chk_st} \n" if ($verbose eq "yes");
+         print "   device:$multipath{$2}{dev} priority:$multipath{$2}{pri} chk_st:$multipath{$2}{chk_st} dev_st:$multipath{$2}{dev_st}\n" if ($verbose eq "yes");
       } 				#end of if block
      
    }
