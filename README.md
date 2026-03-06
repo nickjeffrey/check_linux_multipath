@@ -30,7 +30,8 @@ To avoid giving the low-privileged nagios user permission to run multipathd via 
 # Output
 You will see output similar to the following:
 ```
-dm-multipath SAN disk paths OK   - active:80 passive:0 faulty:0  shaky:0 
-dm-multipath SAN disk paths WARN - active:40 passive:0 faulty:40 shaky:0 
+dm-multipath SAN disk paths OK   - active:80 passive:0 faulty:0  shaky:0
+
+dm-multipath SAN disk paths WARN - Detected 3 faulty paths: sdx sdaa sdac.  Try to delete and rescan the path with: echo 1 > /sys/block/sd???/device/delete , multipath -r , systemctl restart multipathd , rescan-scsi-bus.sh , multipathd show paths , multipath -ll. active:37 passive:0 faulty:3 shaky:0 
 ```
 
