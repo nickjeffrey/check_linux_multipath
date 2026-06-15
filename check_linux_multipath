@@ -20,6 +20,7 @@
 #  2022/08/05   njeffrey	Bug fix in regex for "multipathd show daemon"
 #  2026/03/04   njeffrey	Bug fix in regex for "multipathd show paths"
 #  2026/03/06   njeffrey	Add names of faulty paths to output
+#  2026/06/15   njeffrey   Confirm /etc/multipath.conf is readable
 
 
 
@@ -139,7 +140,18 @@ sub sanity_checks {
       print "$CHECK_NAME UNKNOWN - cannot find multipathd file \n";
       exit $UNKNOWN;                                    #exit script
    }
+   # confirm config file exists
+   if ( ! -f "/etc/multipath.conf" ) {
+      print "$CHECK_NAME UNKNOWN - /etc/multipath.conf does not exist or is not readable by current user \n";
+      exit $UNKNOWN;                                    #exit script
+   }
+   # confirm config file is readable by current user
+   if ( ! -r "/etc/multipath.conf" ) {
+      print "$CHECK_NAME UNKNOWN - /etc/multipath.conf is not readable by current user \n";
+      exit $UNKNOWN;                                    #exit script
+   }
 }                                               #end of subroutine
+
 
 
 sub check_for_output_file {
